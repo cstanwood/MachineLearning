@@ -1,0 +1,136 @@
+---
+title: "Machine Learning Project"
+author: "Christopher Stanwood"
+date: "September 2, 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, strip.white=TRUE, tidy=TRUE, message=FALSE, warning=FALSE, error=FALSE)
+```
+## Overview
+
+The aim of this assignment is to determine how well people do a simple dumbbell exercise, as described here:
+  
+http://web.archive.org/web/20161224072740/http:/groupware.les.inf.puc-rio.br/har
+  
+with the following data:
+  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-training.csv
+  
+https://d396qusza40orc.cloudfront.net/predmachlearn/pml-testing.csv
+  
+The outcome variable is called "classe", which takes the five levels "A", "B", "C", "D", "E". Any other variables may be used to predict the outcome.
+
+## Cleaning the Data 
+
+First of all, import some libraries we will need later:
+```{r}
+library(data.table)
+library(dplyr)
+library(caret)
+library(doParallel)
+```
+
+We need to read in the data. I prefer to use the data.table package because it is very fast and flexible:
+
+```{r}
+pml_training <- fread ("pml-training.csv", stringsAsFactors = T, data.table = F)
+pml_testing <- fread("pml-testing.csv", stringsAsFactors = T, data.table = F)
+```
+
+Basic data exploration:
+
+```{r}
+dim(pml_training)
+summary(pml_training)
+```
+
+There are many columns which are mostly NA or blank. I found these very hard to work with, and so I will remove them, with code which is a modified version of the code given here:
+  
+https://stackoverflow.com/questions/24027605/determine-the-number-of-na-values-in-a-column
+  
+```{r}
+na_count <-
+  data.frame(nas = sapply(pml_training, function(y)
+    length(which(is.na(
+      y
+    ))) +
+      length(which(y == ""))))
+na_count <- cbind(name = rownames(na_count), na_count)
+dropcolumns <- filter(na_count, nas > 19000)$name
+training <- select(pml_training, -one_of(as.character(dropcolumns)))
+```
+
+Also, the first 7 columns do not contain data that appears relevant to predictions, so I will remove them also:
+```{r}
+head( pml_training[,1:7])
+training <- (select(training,-c(1:7)))
+```
+
+## Building the Model & Cross Validation
+
+I choose to use Random Forests because i) this is a highly accurate method and ii) I am not concerned with interpretability.
+
+We will use 10-fold cross validation, in order to increase accuracy and to get an estimate of how well this will work with out of sample data.
+  
+Set up cross validation:
+```{r}
+train_control <- trainControl(method = "cv", number = 10)
+```
+
+Enable parallel processing, to speed up calculations:
+```{r}
+cl <- makeCluster(detectCores() )
+registerDoParallel(cl)
+```
+
+Finally create the model (warning: this takes about 20 minutes on my windows laptop, even using all cores):
+```{r}
+modelRF <-
+  train(classe ~ .,
+        method = "rf",
+        data = training,
+        trControl = train_control)
+stopCluster(cl)
+```
+
+
+## Evaluation of Model
+
+The model has a high accuracy of 99.52%:
+```{r}
+modelRF
+plot(modelRF)
+```
+
+Also the out of box error is very low, at 0.46%:
+```{r}
+modelRF$finalModel
+plot(modelRF$finalModel)
+```
+
+From this, I anticipate an out of sample error under 1%.
+
+## Prediction of test cases
+
+I will prepare the test cases in the same way as the training data:
+
+```{r}
+testing <- select(pml_testing,-one_of(as.character(dropcolumns)))
+testing <- (select(testing, -c(1:7)))
+```
+
+Finally I will use the model to make predictions on the test data:
+
+```{r}
+predRF <- predict(modelRF, testing)
+```
+
+I deliberately did not show the results in order to comply with the Coursera honour code. However, the final predictions for the test data did well on the final quiz.
+
+## Conclusion
+
+The Random Forest algorithm, with 10 fold cross validation, created an accurate model for making predictions on out of sample test data. The drawbacks are that the model was time-consuming to build and is not easy to interpret.
+
+
